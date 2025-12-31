@@ -1,8 +1,8 @@
+using GeradorWebConfig.Util.XML;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Windows.Forms;
 using System.Xml.Linq;
 
@@ -10,37 +10,51 @@ namespace GeradorWebConfig
 {
     public partial class Form1 : Form
     {
-        // Raiz para caminho relativo 
+        // Raiz da aplicação
         private readonly string _appRoot = AppContext.BaseDirectory;
 
         // Pasta base selecionada (absoluta)
         private string? _baseFolderFullPath;
 
-        // Full paths dos web.config na mesma ordem do ListBox
+        // Full paths dos web.config
         private readonly List<string> _foundConfigsFullPath = new();
 
-        // Arquivo atualmente selecionado
+        // Web.config selecionado
         private string? _selectedConfigFullPath;
+
+        // Pasta Templates
+        private readonly string _templatesDir =
+            Path.Combine(AppContext.BaseDirectory, "Templates");
+
+        // Templates da empresa selecionada
+        private readonly List<string> _templateFilesFullPath = new();
+
+        private bool _applyingTemplate;
 
         public Form1()
         {
             InitializeComponent();
 
-            // Ajustes úteis
-            txtConnectionString.ScrollBars = ScrollBars.Both;
+            txtConnectionString.ScrollBars = RichTextBoxScrollBars.Both;
             txtConnectionString.WordWrap = false;
 
-            txtAppSettings.ScrollBars = ScrollBars.Both;
+            txtAppSettings.ScrollBars = RichTextBoxScrollBars.Both;
             txtAppSettings.WordWrap = false;
 
-            // eventos
             lstConfigs.SelectedIndexChanged += lstConfigs_SelectedIndexChanged;
-            btnGerarWebConfig.Click += btnGerarWebConfig_Click;
+            lstTemplates.SelectedIndexChanged += lstTemplates_SelectedIndexChanged;
+            cmbEmpresas.SelectedIndexChanged += cmbEmpresas_SelectedIndexChanged;
 
-            // estado inicial
+            LoadEmpresas();
+
             btnGerarWebConfig.Enabled = false;
+
+            splitContainer2.SplitterDistance = splitContainer2.Width / 2;
+            splitContainer2.Resize += (_, __) =>
+                splitContainer2.SplitterDistance = splitContainer2.Width / 2;
         }
 
+        #region PASTA BASE
         private void btnSelecionaPasta_Click(object sender, EventArgs e)
         {
             using var fbd = new FolderBrowserDialog
@@ -52,175 +66,259 @@ namespace GeradorWebConfig
                 return;
 
             _baseFolderFullPath = Path.GetFullPath(fbd.SelectedPath);
-
-            // Exibe caminho relativo no txtCaminho
             txtCaminho.Text = Path.GetRelativePath(_appRoot, _baseFolderFullPath);
 
             BuscarWebConfigs();
         }
+        #endregion
 
+        #region BUSCAR WEBCONFIG
         private void BuscarWebConfigs()
         {
             lstConfigs.Items.Clear();
             _foundConfigsFullPath.Clear();
-            _selectedConfigFullPath = null;
-
             txtConnectionString.Clear();
             txtAppSettings.Clear();
-            btnGerarWebConfig.Enabled = false;
 
-            if (string.IsNullOrWhiteSpace(_baseFolderFullPath) || !Directory.Exists(_baseFolderFullPath))
-            {
-                MessageBox.Show("Pasta base inválida.", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (!Directory.Exists(_baseFolderFullPath))
                 return;
-            }
 
-            try
+            foreach (var file in Directory.EnumerateFiles(
+                _baseFolderFullPath, "web.config", SearchOption.AllDirectories))
             {
-                //verifica todos os diretorios com o web.config
-                var files = Directory.EnumerateFiles(_baseFolderFullPath, "web.config", SearchOption.AllDirectories)
-                                     .ToList();
-
-                if (files.Count == 0)
-                {
-                    MessageBox.Show("Nenhum web.config encontrado nessa pasta.", "Info",
-                        MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-
-                foreach (var full in files)
-                {
-                    _foundConfigsFullPath.Add(full);
-
-                    // Mostrar relativo à pasta base
-                    var rel = Path.GetRelativePath(_baseFolderFullPath, full);
-                    lstConfigs.Items.Add(rel);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Erro ao buscar web.config:\n{ex.Message}", "Erro",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                _foundConfigsFullPath.Add(file);
+                lstConfigs.Items.Add(Path.GetRelativePath(_baseFolderFullPath, file));
             }
         }
+        #endregion
 
-        //ao selecionar o index
+        #region SELEÇÃO WEBCONFIG
         private void lstConfigs_SelectedIndexChanged(object? sender, EventArgs e)
         {
-            var idx = lstConfigs.SelectedIndex;
-            if (idx < 0 || idx >= _foundConfigsFullPath.Count)
+            if (lstConfigs.SelectedIndex < 0)
                 return;
 
-            _selectedConfigFullPath = _foundConfigsFullPath[idx];
+            _selectedConfigFullPath = _foundConfigsFullPath[lstConfigs.SelectedIndex];
+            CarregarSecoesDoWebConfig(_selectedConfigFullPath);
 
-            try
-            {
-                CarregarSecoesDoWebConfig(_selectedConfigFullPath);
-                btnGerarWebConfig.Enabled = true;
-            }
-            catch (Exception ex)
-            {
-                btnGerarWebConfig.Enabled = false;
-                MessageBox.Show($"Erro ao ler web.config:\n{ex.Message}", "Erro",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            btnGerarWebConfig.Enabled = true;
         }
 
-        private void CarregarSecoesDoWebConfig(string filePath)
+        private void CarregarSecoesDoWebConfig(string path)
         {
-            // Lê XML
-            var doc = XDocument.Load(filePath, LoadOptions.PreserveWhitespace);
+            var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+            var root = doc.Root;
 
-            // web.config pode ter namespace ou não; usar LocalName evita dor de cabeça
-            var configuration = doc.Root;
-            if (configuration == null || configuration.Name.LocalName != "configuration")
-                throw new InvalidOperationException("Arquivo não parece ser um web.config válido (root != configuration).");
+            txtConnectionString.Text =
+                root?.Elements().FirstOrDefault(e => e.Name.LocalName == "connectionStrings")?.ToString()
+                ?? "<connectionStrings />";
 
-            var connectionStrings = configuration.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "connectionStrings");
-
-            var appSettings = configuration.Elements()
-                .FirstOrDefault(e => e.Name.LocalName == "appSettings");
-
-            txtConnectionString.Text = connectionStrings != null
-                ? connectionStrings.ToString()
-                : "<connectionStrings />";
-
-            txtAppSettings.Text = appSettings != null
-                ? appSettings.ToString()
-                : "<appSettings />";
+            txtAppSettings.Text =
+                root?.Elements().FirstOrDefault(e => e.Name.LocalName == "appSettings")?.ToString()
+                ?? "<appSettings />";
         }
+        #endregion
 
+        #region SALVAR WEBCONFIG + TEMPLATE
         private void btnGerarWebConfig_Click(object? sender, EventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(_selectedConfigFullPath) || !File.Exists(_selectedConfigFullPath))
+            if (_selectedConfigFullPath == null)
+                return;
+
+            var doc = XDocument.Load(_selectedConfigFullPath, LoadOptions.PreserveWhitespace);
+            var root = doc.Root ?? throw new InvalidOperationException("web.config inválido");
+
+            var newConn = UtilXML.ParseSectionXml(txtConnectionString.Text, "connectionStrings");
+            var newApp = UtilXML.ParseSectionXml(txtAppSettings.Text, "appSettings");
+
+            root.Elements()
+                .Where(e => e.Name.LocalName is "connectionStrings" or "appSettings")
+                .Remove();
+
+            var configSections = root.Elements()
+                .FirstOrDefault(e => e.Name.LocalName == "configSections");
+
+            if (configSections != null)
             {
-                MessageBox.Show("Selecione um web.config na lista.", "Info",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                configSections.AddAfterSelf(newApp);
+                configSections.AddAfterSelf(newConn);
+            }
+            else
+            {
+                root.AddFirst(newApp);
+                root.AddFirst(newConn);
+            }
+
+            doc.Save(_selectedConfigFullPath);
+
+            var resp = MessageBox.Show(
+                "Deseja salvar essas configurações como TEMPLATE?",
+                "Template",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (resp != DialogResult.Yes)
+                return;
+
+            if (cmbEmpresas.SelectedItem is not string empresa)
+            {
+                MessageBox.Show("Selecione uma empresa.", "Atenção");
                 return;
             }
 
-            try
-            {
-                // Backup (só cria se não existir)
-                var bak = _selectedConfigFullPath + ".bak";
-                if (!File.Exists(bak))
-                    File.Copy(_selectedConfigFullPath, bak);
+            var nomeTemplate = Microsoft.VisualBasic.Interaction.InputBox(
+                "Nome do template:",
+                "Salvar Template",
+                "Padrao");
 
-                // Carrega doc original
-                var doc = XDocument.Load(_selectedConfigFullPath, LoadOptions.PreserveWhitespace);
-                var configuration = doc.Root;
+            if (string.IsNullOrWhiteSpace(nomeTemplate))
+                return;
 
-                if (configuration == null || configuration.Name.LocalName != "configuration")
-                    throw new InvalidOperationException("Arquivo não parece ser um web.config válido.");
+            var empresaDir = Path.Combine(_templatesDir, empresa);
+            Directory.CreateDirectory(empresaDir);
 
-                // Parse do que o usuário editou nos textboxes
-                var newConn = ParseSectionXml(txtConnectionString.Text, expectedRootLocalName: "connectionStrings");
-                var newApp = ParseSectionXml(txtAppSettings.Text, expectedRootLocalName: "appSettings");
+            SaveTemplateXmlByFolder(empresaDir, nomeTemplate);
 
-                // Remove seções antigas (por LocalName)
-                configuration.Elements().Where(e => e.Name.LocalName == "connectionStrings").Remove();
-                configuration.Elements().Where(e => e.Name.LocalName == "appSettings").Remove();
+            LoadTemplatesByEmpresa(empresa);
 
-                // Insere novamente (em ordem “normal”: appSettings e connectionStrings geralmente ficam no topo)
-                // Ajuste se você preferir outra ordem.
-                configuration.AddFirst(newConn);
-                configuration.AddFirst(newApp);
-
-                // Salva
-                doc.Save(_selectedConfigFullPath);
-
-                MessageBox.Show("web.config atualizado com sucesso! (backup .bak criado se ainda não existia)",
-                    "OK", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Erro ao salvar:\n{ex.Message}", "Erro",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            MessageBox.Show("Template salvo com sucesso!");
         }
+        #endregion
 
-        private static XElement ParseSectionXml(string xml, string expectedRootLocalName)
+        #region TEMPLATE
+        private void SaveTemplateXmlByFolder(string empresaDir, string templateName)
         {
-            if (string.IsNullOrWhiteSpace(xml))
-                return new XElement(expectedRootLocalName);
+            var conn = UtilXML.ParseSectionXml(txtConnectionString.Text, "connectionStrings");
+            var app = UtilXML.ParseSectionXml(txtAppSettings.Text, "appSettings");
 
-            XElement el;
+            var doc = new XDocument(
+                new XElement("WebConfigTemplate",
+                    new XAttribute("empresa", Path.GetFileName(empresaDir)),
+                    new XAttribute("name", templateName),
+                    new XAttribute("updatedAt", DateTime.Now.ToString("s")),
+                    conn,
+                    app
+                )
+            );
+
+            var path = Path.Combine(empresaDir, $"{Sanitize(templateName)}.xml");
+            doc.Save(path);
+        }
+
+        private void ApplyTemplateXml(string path)
+        {
+            var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
+            var root = doc.Root;
+
+            txtConnectionString.Text =
+                root?.Elements().FirstOrDefault(e => e.Name.LocalName == "connectionStrings")?.ToString()
+                ?? "<connectionStrings />";
+
+            txtAppSettings.Text =
+                root?.Elements().FirstOrDefault(e => e.Name.LocalName == "appSettings")?.ToString()
+                ?? "<appSettings />";
+        }
+        #endregion
+
+        #region EMPRESAS / TEMPLATES
+        private void LoadEmpresas()
+        {
+            Directory.CreateDirectory(_templatesDir);
+
+            cmbEmpresas.Items.Clear();
+            cmbEmpresas.Items.AddRange(
+                Directory.GetDirectories(_templatesDir)
+                .Select(Path.GetFileName)
+                .OrderBy(x => x)
+                .ToArray()
+            );
+
+            if (cmbEmpresas.Items.Count > 0)
+                cmbEmpresas.SelectedIndex = 0;
+        }
+
+        private void cmbEmpresas_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (cmbEmpresas.SelectedItem is string empresa)
+                LoadTemplatesByEmpresa(empresa);
+        }
+
+        private void LoadTemplatesByEmpresa(string empresa)
+        {
+            lstTemplates.Items.Clear();
+            _templateFilesFullPath.Clear();
+
+            var dir = Path.Combine(_templatesDir, empresa);
+            if (!Directory.Exists(dir))
+                return;
+
+            foreach (var file in Directory.EnumerateFiles(dir, "*.xml"))
+            {
+                _templateFilesFullPath.Add(file);
+                lstTemplates.Items.Add(Path.GetFileNameWithoutExtension(file));
+            }
+        }
+
+        private void lstTemplates_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (_applyingTemplate || lstTemplates.SelectedIndex < 0)
+                return;
+
             try
             {
-                el = XElement.Parse(xml, LoadOptions.PreserveWhitespace);
+                _applyingTemplate = true;
+                ApplyTemplateXml(_templateFilesFullPath[lstTemplates.SelectedIndex]);
             }
-            catch (Exception ex)
+            finally
             {
-                throw new InvalidOperationException(
-                    $"O texto do {expectedRootLocalName} não é um XML válido.\nDetalhe: {ex.Message}");
+                _applyingTemplate = false;
+            }
+        }
+        #endregion
+
+        private static string Sanitize(string name)
+        {
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+            return name;
+        }
+
+        private void btnNovaEmpresa_Click(object sender, EventArgs e)
+        {
+            var empresa = Microsoft.VisualBasic.Interaction.InputBox(
+                "Nome da nova empresa:",
+                "Nova empresa",
+                "");
+
+            if (string.IsNullOrWhiteSpace(empresa))
+                return;
+
+            empresa = Sanitize(empresa);
+
+            var empresaDir = Path.Combine(_templatesDir, empresa);
+
+            if (Directory.Exists(empresaDir))
+            {
+                MessageBox.Show(
+                    "Essa empresa já existe.",
+                    "Atenção",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
             }
 
-            if (!string.Equals(el.Name.LocalName, expectedRootLocalName, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException(
-                    $"Esperado <{expectedRootLocalName}> mas veio <{el.Name.LocalName}>.");
+            Directory.CreateDirectory(empresaDir);
 
-            return el;
+            // Atualiza combo e seleciona automaticamente
+            LoadEmpresas();
+            cmbEmpresas.SelectedItem = empresa;
+
+            MessageBox.Show(
+                "Empresa criada com sucesso!",
+                "OK",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
         }
+
     }
 }
