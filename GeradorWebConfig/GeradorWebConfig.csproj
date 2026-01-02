@@ -12,4 +12,10 @@
     <PackageReference Include="Microsoft.Identity.Client" Version="4.79.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\GeradorWebConfig.Application\GeradorWebConfig.Application.csproj" />
+    <ProjectReference Include="..\GeradorWebConfig.Domain\GeradorWebConfig.Domain.csproj" />
+    <ProjectReference Include="..\GeradorWebConfig.Infraestructure\GeradorWebConfig.Infraestructure.csproj" />
+  </ItemGroup>
+
 </Project>

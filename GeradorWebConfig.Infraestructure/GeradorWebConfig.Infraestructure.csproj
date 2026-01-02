@@ -6,4 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\GeradorWebConfig.Application\GeradorWebConfig.Application.csproj" />
+    <ProjectReference Include="..\GeradorWebConfig.Domain\GeradorWebConfig.Domain.csproj" />
+  </ItemGroup>
+
 </Project>
